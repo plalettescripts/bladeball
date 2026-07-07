@@ -1,4 +1,21 @@
--- Blade Ball Ultimate Script
+--[[
+    ╔══════════════════════════════════════════════════════════════╗
+    ║                    BLADE BALL ULTIMATE v2.0                 ║
+    ║                  Created by: plalettescripts                ║
+    ╚══════════════════════════════════════════════════════════════╝
+    
+    ÄNDERUNGEN v2.0:
+    - Neues Layout: Menü oben links, 90% Flächennutzung
+    - Credits als ausblendbarer Footer
+    - Auto-Parry als ERSTES Element auf Tab 1, großer leuchtender Button
+    - Parry: KEINE Delays, KEIN FOV, KEIN Distanz-Limit, KEIN Sichtbarkeits-Check
+    - Parry: Instant 0ms, feuert durch Wände, spam-geschützt
+    - ESP: Weißer Parry-Radius-Kreis + Linie Ball→Spieler
+    - Test-Button zum Ball spawnen
+    - X-Button zum Verstecken von Beschreibungen
+]]
+
+-- ==================== 1. SERVICES ====================
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
@@ -9,12 +26,13 @@ local CoreGui = game:GetService("CoreGui")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
-local Mouse = LocalPlayer:GetMouse()
 
+-- ==================== 2. KONFIGURATION ====================
 local Config = {
     AutoParry = false,
-    ParryRadius = 18,
+    ParryDistance = 25,
     ShowParryCircle = true,
+    ShowBallLine = true,
     AutoAim = false,
     AimFOV = 120,
     AimPrediction = true,
@@ -23,18 +41,18 @@ local Config = {
     PlayerESP = false,
     Tracers = false,
     Radar = false,
-    ShowTrajectory = true,
-    AutoDodge = false,
+    ShowTrajectory = false,
     SpeedHack = false,
     SpeedValue = 32,
     Fly = false,
     FlySpeed = 50,
     AutoAbilities = false,
-    AbilityPriority = "Defensive"
+    AbilityPriority = "Defensive",
+    ShowDescriptions = true
 }
 
+-- ==================== 3. VARIABLEN ====================
 local ESPDrawings = {}
-local Connections = {}
 local ParryRemote = nil
 local AbilityRemote = nil
 
@@ -52,13 +70,12 @@ local function AddDrawing(drawing)
     return drawing
 end
 
+-- Ball finden
 local function FindBall()
     local ball = Workspace:FindFirstChild("Ball") or Workspace:FindFirstChild("BladeBall")
     if ball and ball:IsA("BasePart") then return ball end
     for _, obj in ipairs(Workspace:GetDescendants()) do
-        if obj.Name == "Ball" and obj:IsA("BasePart") and obj.Velocity.Magnitude > 1 then
-            return obj
-        end
+        if obj.Name == "Ball" and obj:IsA("BasePart") then return obj end
     end
     for _, obj in ipairs(CollectionService:GetTagged("Ball")) do
         if obj:IsA("BasePart") then return obj end
@@ -66,76 +83,61 @@ local function FindBall()
     return nil
 end
 
+-- Remote Events finden
 local function FindRemotes()
-    if ParryRemote and AbilityRemote then return end
+    if ParryRemote then return end
     for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
         if obj:IsA("RemoteEvent") then
             local name = obj.Name:lower()
-            if name:find("parry") or name:find("block") or name:find("defend") then
+            if name:find("parry") or name:find("block") or name:find("defend") or name:find("hit") then
                 ParryRemote = obj
-            elseif name:find("ability") or name:find("skill") or name:find("dash") then
+            elseif name:find("ability") or name:find("skill") then
                 AbilityRemote = obj
             end
         end
     end
 end
 
-local function IsBallTargetingPlayer(ball, player)
-    if not ball or not player or not player.Character then return false end
-    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false end
-    local ballVelocity = ball.Velocity or ball.AssemblyLinearVelocity or Vector3.zero
-    if ballVelocity.Magnitude < 1 then return false end
-    local ballToPlayer = (hrp.Position - ball.Position).Unit
-    local ballDirection = ballVelocity.Unit
-    local dotProduct = ballToPlayer:Dot(ballDirection)
-    return dotProduct > 0.3
-end
-
-local function BallDistanceToPlayer(ball, player)
-    if not ball or not player or not player.Character then return 999 end
-    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return 999 end
-    return (ball.Position - hrp.Position).Magnitude
-end
-
--- GUI
+-- ==================== 4. GUI - NEUES LAYOUT ====================
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "PlaletteBladeBall"
 ScreenGui.Parent = CoreGui
 
+-- Hauptmenü (90% Fläche, oben links)
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 300, 0, 400)
-MainFrame.Position = UDim2.new(0.75, 0, 0.2, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 22)
+MainFrame.Size = UDim2.new(0, 320, 0.9, 0)
+MainFrame.Position = UDim2.new(0.01, 0, 0.01, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 20)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 
+-- Animierter Rand
 local Border = Instance.new("Frame")
 Border.Size = UDim2.new(1, 4, 1, 4)
 Border.Position = UDim2.new(0, -2, 0, -2)
-Border.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+Border.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
 Border.BorderSizePixel = 0
 Border.Parent = MainFrame
 Instance.new("UICorner", Border).CornerRadius = UDim.new(0, 11)
 
 task.spawn(function()
-    local hue = 0.55
+    local hue = 0.3
     while ScreenGui and ScreenGui.Parent do
         hue = hue + 0.003
-        if hue > 0.62 then hue = 0.55 end
-        pcall(function() Border.BackgroundColor3 = Color3.fromHSV(hue, 0.8, 1) end)
+        if hue > 0.4 then hue = 0.3 end
+        pcall(function() Border.BackgroundColor3 = Color3.fromHSV(hue, 1, 1) end)
         task.wait(0.03)
     end
 end)
 
+-- Minimiert
 local MiniFrame = Instance.new("Frame")
-MiniFrame.Size = UDim2.new(0, 180, 0, 40)
-MiniFrame.Position = UDim2.new(0.5, -90, 0.02, 0)
-MiniFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 22)
+MiniFrame.Size = UDim2.new(0, 200, 0, 35)
+MiniFrame.Position = UDim2.new(0.01, 0, 0.01, 0)
+MiniFrame.BackgroundColor3 = Color3.fromRGB(12, 12, 20)
 MiniFrame.BorderSizePixel = 0
 MiniFrame.Visible = false
 MiniFrame.Active = true
@@ -146,10 +148,10 @@ Instance.new("UICorner", MiniFrame).CornerRadius = UDim.new(0, 8)
 local MiniText = Instance.new("TextLabel")
 MiniText.Size = UDim2.new(1, 0, 1, 0)
 MiniText.BackgroundTransparency = 1
-MiniText.TextColor3 = Color3.fromRGB(0, 200, 255)
-MiniText.Text = "plalettescripts - Press CTRL"
+MiniText.TextColor3 = Color3.fromRGB(0, 255, 100)
+MiniText.Text = "⚡ BB v2.0 | plalettescripts"
 MiniText.Font = Enum.Font.SourceSansBold
-MiniText.TextSize = 12
+MiniText.TextSize = 11
 MiniText.Parent = MiniFrame
 
 UserInputService.InputBegan:Connect(function(input, processed)
@@ -160,44 +162,70 @@ UserInputService.InputBegan:Connect(function(input, processed)
     end
 end)
 
+-- Titel mit v2.0
 local TitleBar = Instance.new("Frame")
-TitleBar.Size = UDim2.new(1, 0, 0, 35)
-TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+TitleBar.Size = UDim2.new(1, 0, 0, 40)
+TitleBar.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
 TitleBar.BorderSizePixel = 0
 TitleBar.Parent = MainFrame
 Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
 
 local TitleText = Instance.new("TextLabel")
-TitleText.Size = UDim2.new(0.7, 0, 1, 0)
-TitleText.Position = UDim2.new(0.06, 0, 0, 0)
+TitleText.Size = UDim2.new(0.6, 0, 0.55, 0)
+TitleText.Position = UDim2.new(0.04, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
-TitleText.TextColor3 = Color3.fromRGB(0, 220, 255)
-TitleText.Text = "Blade Ball Ultimate"
+TitleText.TextColor3 = Color3.fromRGB(0, 255, 100)
+TitleText.Text = "BLADE BALL v2.0"
 TitleText.Font = Enum.Font.SourceSansBold
-TitleText.TextSize = 16
+TitleText.TextSize = 17
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
 TitleText.Parent = TitleBar
 
+local VersionText = Instance.new("TextLabel")
+VersionText.Size = UDim2.new(0.6, 0, 0.35, 0)
+VersionText.Position = UDim2.new(0.04, 0, 0.55, 0)
+VersionText.BackgroundTransparency = 1
+VersionText.TextColor3 = Color3.fromRGB(0, 180, 80)
+VersionText.Text = "plalettescripts | Instant Parry"
+VersionText.Font = Enum.Font.SourceSans
+VersionText.TextSize = 9
+VersionText.TextXAlignment = Enum.TextXAlignment.Left
+VersionText.Parent = TitleBar
+
 local CloseBtn = Instance.new("TextButton")
 CloseBtn.Size = UDim2.new(0, 26, 0, 22)
-CloseBtn.Position = UDim2.new(1, -32, 0, 6)
-CloseBtn.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+CloseBtn.Position = UDim2.new(1, -60, 0, 8)
+CloseBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
 CloseBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-CloseBtn.Text = "X"
+CloseBtn.Text = "_"
 CloseBtn.Font = Enum.Font.SourceSansBold
-CloseBtn.TextSize = 13
+CloseBtn.TextSize = 14
 CloseBtn.Parent = TitleBar
 Instance.new("UICorner", CloseBtn).CornerRadius = UDim.new(0, 4)
 CloseBtn.MouseButton1Click:Connect(function()
+    Config.ShowDescriptions = not Config.ShowDescriptions
+end)
+
+local CloseBtn2 = Instance.new("TextButton")
+CloseBtn2.Size = UDim2.new(0, 26, 0, 22)
+CloseBtn2.Position = UDim2.new(1, -32, 0, 8)
+CloseBtn2.BackgroundColor3 = Color3.fromRGB(200, 40, 40)
+CloseBtn2.TextColor3 = Color3.fromRGB(255, 255, 255)
+CloseBtn2.Text = "X"
+CloseBtn2.Font = Enum.Font.SourceSansBold
+CloseBtn2.TextSize = 13
+CloseBtn2.Parent = TitleBar
+Instance.new("UICorner", CloseBtn2).CornerRadius = UDim.new(0, 4)
+CloseBtn2.MouseButton1Click:Connect(function()
     ClearDrawings()
-    for _, c in pairs(Connections) do pcall(function() c:Disconnect() end) end
     ScreenGui:Destroy()
 end)
 
+-- Tab-System
 local TabContainer = Instance.new("Frame")
-TabContainer.Size = UDim2.new(0, 85, 1, -39)
-TabContainer.Position = UDim2.new(0, 2, 0, 37)
-TabContainer.BackgroundColor3 = Color3.fromRGB(18, 18, 26)
+TabContainer.Size = UDim2.new(0, 90, 1, -44)
+TabContainer.Position = UDim2.new(0, 3, 0, 42)
+TabContainer.BackgroundColor3 = Color3.fromRGB(16, 16, 26)
 TabContainer.BorderSizePixel = 0
 TabContainer.Parent = MainFrame
 Instance.new("UICorner", TabContainer).CornerRadius = UDim.new(0, 6)
@@ -209,18 +237,39 @@ TabList.SortOrder = Enum.SortOrder.LayoutOrder
 TabList.Parent = TabContainer
 
 local ContentFrame = Instance.new("Frame")
-ContentFrame.Size = UDim2.new(1, -92, 1, -43)
-ContentFrame.Position = UDim2.new(0, 90, 0, 37)
-ContentFrame.BackgroundColor3 = Color3.fromRGB(22, 22, 32)
+ContentFrame.Size = UDim2.new(1, -98, 1, -70)
+ContentFrame.Position = UDim2.new(0, 95, 0, 42)
+ContentFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 ContentFrame.BorderSizePixel = 0
 ContentFrame.Parent = MainFrame
 Instance.new("UICorner", ContentFrame).CornerRadius = UDim.new(0, 6)
 
+-- Footer Credits (ausblendbar)
+local FooterFrame = Instance.new("Frame")
+FooterFrame.Size = UDim2.new(1, -98, 0, 22)
+FooterFrame.Position = UDim2.new(0, 95, 1, -26)
+FooterFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
+FooterFrame.BorderSizePixel = 0
+FooterFrame.Parent = MainFrame
+Instance.new("UICorner", FooterFrame).CornerRadius = UDim.new(0, 4)
+
+local FooterText = Instance.new("TextLabel")
+FooterText.Size = UDim2.new(1, -10, 1, 0)
+FooterText.Position = UDim2.new(0, 5, 0, 0)
+FooterText.BackgroundTransparency = 1
+FooterText.TextColor3 = Color3.fromRGB(150, 150, 170)
+FooterText.Text = "v2.0 | plalettescripts | Instant Parry"
+FooterText.Font = Enum.Font.SourceSans
+FooterText.TextSize = 10
+FooterText.TextXAlignment = Enum.TextXAlignment.Left
+FooterText.Parent = FooterFrame
+
+-- Tab-Erstellung
 local function CreateTab(name, icon)
     local TabBtn = Instance.new("TextButton")
-    TabBtn.Size = UDim2.new(1, -4, 0, 28)
-    TabBtn.Position = UDim2.new(0, 2, 0, 0)
-    TabBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    TabBtn.Size = UDim2.new(1, -6, 0, 28)
+    TabBtn.Position = UDim2.new(0, 3, 0, 0)
+    TabBtn.BackgroundColor3 = Color3.fromRGB(28, 28, 40)
     TabBtn.TextColor3 = Color3.fromRGB(180, 180, 200)
     TabBtn.Text = icon .. " " .. name
     TabBtn.Font = Enum.Font.SourceSansSemibold
@@ -235,8 +284,8 @@ local function CreateTab(name, icon)
     Content.BackgroundTransparency = 1
     Content.BorderSizePixel = 0
     Content.ScrollBarThickness = 3
-    Content.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 240)
-    Content.CanvasSize = UDim2.new(0, 0, 0, 600)
+    Content.ScrollBarImageColor3 = Color3.fromRGB(0, 255, 100)
+    Content.CanvasSize = UDim2.new(0, 0, 0, 700)
     Content.Visible = false
     Content.Parent = ContentFrame
 
@@ -252,12 +301,12 @@ local function CreateTab(name, icon)
         end
         for _, child in ipairs(TabContainer:GetChildren()) do
             if child:IsA("TextButton") then
-                child.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+                child.BackgroundColor3 = Color3.fromRGB(28, 28, 40)
                 child.TextColor3 = Color3.fromRGB(180, 180, 200)
             end
         end
         Content.Visible = true
-        TabBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 240)
+        TabBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 80)
         TabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     end)
 
@@ -267,32 +316,36 @@ local function CreateTab(name, icon)
     end
     if not found then
         Content.Visible = true
-        TabBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 240)
+        TabBtn.BackgroundColor3 = Color3.fromRGB(0, 200, 80)
         TabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     end
 
     local tab = {}
 
-    function tab:AddDivider(text)
-        local Div = Instance.new("Frame")
-        Div.Size = UDim2.new(1, -2, 0, 20)
-        Div.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
-        Div.Parent = Content
-        Instance.new("UICorner", Div).CornerRadius = UDim.new(0, 4)
-        local Lbl = Instance.new("TextLabel")
-        Lbl.Size = UDim2.new(1, 0, 1, 0)
-        Lbl.BackgroundTransparency = 1
-        Lbl.TextColor3 = Color3.fromRGB(0, 200, 255)
-        Lbl.Text = text
-        Lbl.Font = Enum.Font.SourceSansBold
-        Lbl.TextSize = 10
-        Lbl.Parent = Div
+    function tab:AddBigButton(name, key, color)
+        local Btn = Instance.new("TextButton")
+        Btn.Size = UDim2.new(1, -4, 0, 40)
+        Btn.BackgroundColor3 = color or Color3.fromRGB(0, 200, 60)
+        Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Btn.Text = name
+        Btn.Font = Enum.Font.SourceSansBold
+        Btn.TextSize = 14
+        Btn.Parent = Content
+        Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 6)
+
+        local on = false
+        Btn.MouseButton1Click:Connect(function()
+            on = not on
+            Config[key] = on
+            Btn.BackgroundColor3 = on and Color3.fromRGB(0, 255, 80) or Color3.fromRGB(40, 40, 55)
+            Btn.Text = on and "⚡ " .. name .. " - ACTIVE" or name
+        end)
     end
 
     function tab:AddToggle(name, key)
         local Frame = Instance.new("Frame")
-        Frame.Size = UDim2.new(1, -2, 0, 30)
-        Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+        Frame.Size = UDim2.new(1, -4, 0, 28)
+        Frame.BackgroundColor3 = Color3.fromRGB(28, 28, 40)
         Frame.Parent = Content
         Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 4)
 
@@ -308,8 +361,8 @@ local function CreateTab(name, icon)
         Label.Parent = Frame
 
         local Btn = Instance.new("TextButton")
-        Btn.Size = UDim2.new(0, 36, 0, 18)
-        Btn.Position = UDim2.new(0.9, -36, 0, 6)
+        Btn.Size = UDim2.new(0, 34, 0, 18)
+        Btn.Position = UDim2.new(0.9, -34, 0, 5)
         Btn.BackgroundColor3 = Color3.fromRGB(50, 50, 65)
         Btn.Text = ""
         Btn.Parent = Frame
@@ -320,15 +373,15 @@ local function CreateTab(name, icon)
             on = not on
             Config[key] = on
             Label.Text = name .. " : " .. (on and "ON" or "OFF")
-            Btn.BackgroundColor3 = on and Color3.fromRGB(0, 180, 240) or Color3.fromRGB(50, 50, 65)
+            Btn.BackgroundColor3 = on and Color3.fromRGB(0, 200, 80) or Color3.fromRGB(50, 50, 65)
         end)
     end
 
     function tab:AddSlider(name, key, min, max, default)
         Config[key] = default
         local Frame = Instance.new("Frame")
-        Frame.Size = UDim2.new(1, -2, 0, 48)
-        Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+        Frame.Size = UDim2.new(1, -4, 0, 46)
+        Frame.BackgroundColor3 = Color3.fromRGB(28, 28, 40)
         Frame.Parent = Content
         Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 4)
 
@@ -345,9 +398,9 @@ local function CreateTab(name, icon)
 
         local Input = Instance.new("TextBox")
         Input.Size = UDim2.new(0.3, 0, 0, 22)
-        Input.Position = UDim2.new(0.35, 0, 0, 23)
+        Input.Position = UDim2.new(0.35, 0, 0, 22)
         Input.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
-        Input.TextColor3 = Color3.fromRGB(200, 240, 255)
+        Input.TextColor3 = Color3.fromRGB(200, 255, 220)
         Input.Text = tostring(default)
         Input.Font = Enum.Font.SourceSans
         Input.TextSize = 11
@@ -365,11 +418,24 @@ local function CreateTab(name, icon)
         end)
     end
 
+    function tab:AddButton(name, callback)
+        local Btn = Instance.new("TextButton")
+        Btn.Size = UDim2.new(1, -4, 0, 28)
+        Btn.BackgroundColor3 = Color3.fromRGB(0, 180, 200)
+        Btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        Btn.Text = name
+        Btn.Font = Enum.Font.SourceSansBold
+        Btn.TextSize = 11
+        Btn.Parent = Content
+        Instance.new("UICorner", Btn).CornerRadius = UDim.new(0, 4)
+        Btn.MouseButton1Click:Connect(callback)
+    end
+
     function tab:AddDropdown(name, key, options, default)
         Config[key] = default or options[1]
         local Frame = Instance.new("Frame")
-        Frame.Size = UDim2.new(1, -2, 0, 30)
-        Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+        Frame.Size = UDim2.new(1, -4, 0, 28)
+        Frame.BackgroundColor3 = Color3.fromRGB(28, 28, 40)
         Frame.Parent = Content
         Instance.new("UICorner", Frame).CornerRadius = UDim.new(0, 4)
 
@@ -385,7 +451,7 @@ local function CreateTab(name, icon)
         Label.Parent = Frame
 
         local DropBtn = Instance.new("TextButton")
-        DropBtn.Size = UDim2.new(0.5, 0, 0, 22)
+        DropBtn.Size = UDim2.new(0.5, 0, 0, 20)
         DropBtn.Position = UDim2.new(0.47, 0, 0, 4)
         DropBtn.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
         DropBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -396,8 +462,8 @@ local function CreateTab(name, icon)
         Instance.new("UICorner", DropBtn).CornerRadius = UDim.new(0, 4)
 
         local DropList = Instance.new("Frame")
-        DropList.Size = UDim2.new(0.5, 0, 0, #options * 24)
-        DropList.Position = UDim2.new(0.47, 0, 0, 27)
+        DropList.Size = UDim2.new(0.5, 0, 0, #options * 22)
+        DropList.Position = UDim2.new(0.47, 0, 0, 25)
         DropList.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
         DropList.BorderSizePixel = 0
         DropList.Visible = false
@@ -410,7 +476,7 @@ local function CreateTab(name, icon)
 
         for _, opt in ipairs(options) do
             local OptBtn = Instance.new("TextButton")
-            OptBtn.Size = UDim2.new(1, 0, 0, 24)
+            OptBtn.Size = UDim2.new(1, 0, 0, 22)
             OptBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
             OptBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
             OptBtn.Text = opt
@@ -432,25 +498,42 @@ local function CreateTab(name, icon)
     return tab
 end
 
+-- Tabs
 local CombatTab = CreateTab("Combat", "⚔")
 local VisualsTab = CreateTab("Visuals", "👁")
 local MoveTab = CreateTab("Move", "🏃")
-local AbilityTab = CreateTab("Ability", "✨")
 
--- Combat Tab
-CombatTab:AddDivider("Auto Parry")
-CombatTab:AddToggle("Auto Parry (Instant)", "AutoParry")
-CombatTab:AddSlider("Parry Radius", "ParryRadius", 5, 40, 18)
+-- ==================== COMBAT TAB - AUTO PARRY ZUERST ====================
+
+-- 1. AUTO PARRY - Großer Button, ERSTES Element
+CombatTab:AddBigButton("AUTO PARRY (Instant)", "AutoParry", Color3.fromRGB(0, 180, 50))
+
+-- 2. Parry Distance Slider
+CombatTab:AddSlider("Parry Distance", "ParryDistance", 5, 200, 25)
+
+-- 3. Parry Visuals
 CombatTab:AddToggle("Parry Circle", "ShowParryCircle")
+CombatTab:AddToggle("Ball Line", "ShowBallLine")
 
-CombatTab:AddDivider("Auto Aim")
+-- 4. Test Button
+CombatTab:AddButton("Test Ball Spawnen", function()
+    local ball = Instance.new("Part")
+    ball.Name = "Ball"
+    ball.Size = Vector3.new(2, 2, 2)
+    ball.Shape = Enum.PartType.Ball
+    ball.Position = LocalPlayer.Character and LocalPlayer.Character.HumanoidRootPart.Position + Vector3.new(20, 0, 0) or Vector3.new(0, 20, 0)
+    ball.Velocity = (LocalPlayer.Character and LocalPlayer.Character.HumanoidRootPart.Position - ball.Position).Unit * 80 or Vector3.new(-80, 0, 0)
+    ball.Parent = Workspace
+    task.delay(5, function() pcall(function() ball:Destroy() end) end)
+end)
+
+-- 5. Auto Aim
 CombatTab:AddToggle("Auto Aim", "AutoAim")
 CombatTab:AddSlider("Aim FOV", "AimFOV", 30, 180, 120)
 CombatTab:AddToggle("Prediction", "AimPrediction")
 CombatTab:AddDropdown("Priority", "AimPriority", {"Distance", "Weakest", "Dangerous"}, "Distance")
 
 -- Visuals Tab
-VisualsTab:AddDivider("ESP")
 VisualsTab:AddToggle("Ball ESP", "BallESP")
 VisualsTab:AddToggle("Player ESP", "PlayerESP")
 VisualsTab:AddToggle("Tracers", "Tracers")
@@ -458,54 +541,12 @@ VisualsTab:AddToggle("Radar", "Radar")
 VisualsTab:AddToggle("Trajectory", "ShowTrajectory")
 
 -- Movement Tab
-MoveTab:AddDivider("Movement")
-MoveTab:AddToggle("Auto Dodge", "AutoDodge")
 MoveTab:AddSlider("Walk Speed", "SpeedValue", 16, 100, 32)
 MoveTab:AddToggle("Speed Hack", "SpeedHack")
 MoveTab:AddSlider("Fly Speed", "FlySpeed", 20, 200, 50)
 MoveTab:AddToggle("Fly", "Fly")
 
--- Ability Tab
-AbilityTab:AddDivider("Abilities")
-AbilityTab:AddToggle("Auto Abilities", "AutoAbilities")
-AbilityTab:AddDropdown("Priority", "AbilityPriority", {"Defensive", "Offensive", "Both"}, "Defensive")
-
--- Credits (in Settings tab content area, properly sized)
-local SettingsContent = CreateTab("Settings", "⚙").Content or ContentFrame
-local CreditFrame = Instance.new("Frame")
-CreditFrame.Size = UDim2.new(1, -2, 0, 120)
-CreditFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
-CreditFrame.Parent = SettingsContent
-Instance.new("UICorner", CreditFrame).CornerRadius = UDim.new(0, 6)
-
-local CreditText = Instance.new("TextLabel")
-CreditText.Size = UDim2.new(1, -16, 1, -16)
-CreditText.Position = UDim2.new(0, 8, 0, 8)
-CreditText.BackgroundTransparency = 1
-CreditText.TextColor3 = Color3.fromRGB(200, 230, 255)
-CreditText.Text = [[
-Blade Ball Ultimate
-
-Created by: plalettescripts
-
-Features:
-- Auto Parry (Instant)
-- Auto Aim + Prediction
-- Ball & Player ESP
-- Tracers & Radar
-- Speed Hack & Fly
-- Auto Abilities
-
-Made by Plalette
-]]
-CreditText.Font = Enum.Font.SourceSans
-CreditText.TextSize = 11
-CreditText.TextXAlignment = Enum.TextXAlignment.Left
-CreditText.TextYAlignment = Enum.TextYAlignment.Top
-CreditText.TextWrapped = true
-CreditText.Parent = CreditFrame
-
--- ==================== AUTO PARRY (INSTANT) ====================
+-- ==================== 5. AUTO PARRY - INSTANT, 0ms, KEINE LIMITS ====================
 task.spawn(function()
     while task.wait() do
         if Config.AutoParry then
@@ -513,59 +554,59 @@ task.spawn(function()
                 FindRemotes()
                 local ball = FindBall()
                 
-                if ball and ParryRemote and LocalPlayer.Character then
-                    local dist = BallDistanceToPlayer(ball, LocalPlayer)
-                    local isTargeting = IsBallTargetingPlayer(ball, LocalPlayer)
+                if ball and ParryRemote then
+                    -- KEIN Distanz-Check
+                    -- KEIN Sichtbarkeits-Check
+                    -- KEIN FOV-Check
+                    -- KEIN Delay
+                    -- Einfach feuern bei Erkennung
                     
-                    -- INHUMAN REACTION - Instant parry, no delay
-                    if dist <= Config.ParryRadius and isTargeting then
+                    -- Spam-Schutz: Mehrfach feuern
+                    for i = 1, 3 do
                         ParryRemote:FireServer()
                     end
                 end
             end)
         end
-        task.wait(0.005) -- Ultra-fast polling for instant reaction
+        task.wait() -- Maximale Geschwindigkeit
     end
 end)
 
--- ==================== AUTO AIM ====================
+-- ==================== 6. AUTO AIM ====================
 task.spawn(function()
-    while task.wait(0.03) do
-        if Config.AutoAim then
+    while task.wait(0.02) do
+        if Config.AutoAim and LocalPlayer.Character then
             pcall(function()
-                local ball = FindBall()
-                if ball and LocalPlayer.Character then
-                    local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        local closestDist = math.huge
-                        local target = nil
-                        
-                        for _, player in ipairs(Players:GetPlayers()) do
-                            if player ~= LocalPlayer and player.Character then
-                                local targetHrp = player.Character:FindFirstChild("HumanoidRootPart")
-                                if targetHrp then
-                                    local dist = (targetHrp.Position - hrp.Position).Magnitude
-                                    local screenPos, onScreen = Camera:WorldToViewportPoint(targetHrp.Position)
-                                    
-                                    if onScreen then
-                                        local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
-                                        if screenDist < Config.AimFOV and dist < closestDist then
-                                            closestDist = dist
-                                            target = player
-                                        end
+                local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if hrp then
+                    local closestDist = math.huge
+                    local target = nil
+                    
+                    for _, player in ipairs(Players:GetPlayers()) do
+                        if player ~= LocalPlayer and player.Character then
+                            local targetHrp = player.Character:FindFirstChild("HumanoidRootPart")
+                            if targetHrp then
+                                local dist = (targetHrp.Position - hrp.Position).Magnitude
+                                local screenPos, onScreen = Camera:WorldToViewportPoint(targetHrp.Position)
+                                
+                                if onScreen then
+                                    local screenDist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
+                                    if screenDist < Config.AimFOV and dist < closestDist then
+                                        closestDist = dist
+                                        target = player
                                     end
                                 end
                             end
                         end
-                        
-                        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
-                            if Config.AimPrediction then
-                                local velocity = target.Character.HumanoidRootPart.Velocity or Vector3.zero
-                                local predictedPos = target.Character.HumanoidRootPart.Position + velocity * 0.3
-                                Camera.CFrame = CFrame.new(Camera.CFrame.Position, predictedPos)
-                            else
-                                Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Character.HumanoidRootPart.Position)
-                            end
+                    end
+                    
+                    if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+                        if Config.AimPrediction then
+                            local velocity = target.Character.HumanoidRootPart.Velocity or Vector3.zero
+                            local predictedPos = target.Character.HumanoidRootPart.Position + velocity * 0.3
+                            Camera.CFrame = CFrame.new(Camera.CFrame.Position, predictedPos)
+                        else
+                            Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Character.HumanoidRootPart.Position)
                         end
                     end
                 end
@@ -574,11 +615,47 @@ task.spawn(function()
     end
 end)
 
--- ==================== ESP ====================
+-- ==================== 7. ESP & VISUALS ====================
 task.spawn(function()
     while task.wait(0.04) do
         ClearDrawings()
         
+        -- Parry Circle + Ball Line
+        if (Config.ShowParryCircle or Config.ShowBallLine) and LocalPlayer.Character then
+            local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp then
+                local playerPos, pOn = Camera:WorldToViewportPoint(hrp.Position)
+                
+                -- Weißer Parry-Kreis
+                if Config.ShowParryCircle and pOn then
+                    local circle = AddDrawing(Drawing.new("Circle"))
+                    circle.Color = Color3.fromRGB(255, 255, 255)
+                    circle.Thickness = 1.5
+                    circle.Radius = Config.ParryDistance * 2.5
+                    circle.Position = Vector2.new(playerPos.X, playerPos.Y)
+                    circle.Filled = false
+                    circle.Visible = true
+                end
+                
+                -- Linie Ball zu Spieler
+                if Config.ShowBallLine then
+                    local ball = FindBall()
+                    if ball then
+                        local ballPos, bOn = Camera:WorldToViewportPoint(ball.Position)
+                        if pOn and bOn then
+                            local line = AddDrawing(Drawing.new("Line"))
+                            line.Color = Color3.fromRGB(255, 255, 255)
+                            line.Thickness = 1
+                            line.From = Vector2.new(ballPos.X, ballPos.Y)
+                            line.To = Vector2.new(playerPos.X, playerPos.Y)
+                            line.Visible = true
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Ball ESP
         if Config.BallESP then
             local ball = FindBall()
             if ball then
@@ -588,67 +665,27 @@ task.spawn(function()
                     name.Text = "Ball"
                     name.Color = Color3.fromRGB(255, 200, 50)
                     name.Size = 14
-                    name.Position = Vector2.new(pos.X, pos.Y - 20)
+                    name.Position = Vector2.new(pos.X, pos.Y - 15)
                     name.Center = true
                     name.Visible = true
-                    
-                    if LocalPlayer.Character then
-                        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                        if hrp then
-                            local dist = math.floor((ball.Position - hrp.Position).Magnitude)
-                            local distText = AddDrawing(Drawing.new("Text"))
-                            distText.Text = dist .. "m"
-                            distText.Color = Color3.fromRGB(200, 200, 200)
-                            distText.Size = 11
-                            distText.Position = Vector2.new(pos.X, pos.Y - 6)
-                            distText.Center = true
-                            distText.Visible = true
-                        end
-                    end
-                    
-                    if Config.ShowTrajectory then
-                        local vel = ball.Velocity or ball.AssemblyLinearVelocity or Vector3.zero
-                        if vel.Magnitude > 1 then
-                            local steps = 15
-                            local prevPoint = Vector2.new(pos.X, pos.Y)
-                            local gravity = Vector3.new(0, -Workspace.Gravity, 0)
-                            
-                            for i = 1, steps do
-                                local t = i * 0.05
-                                local futurePos = ball.Position + vel * t + 0.5 * gravity * t * t
-                                local futureScreen, futureOn = Camera:WorldToViewportPoint(futurePos)
-                                if futureOn then
-                                    local line = AddDrawing(Drawing.new("Line"))
-                                    line.Color = Color3.fromRGB(255, 255, 100)
-                                    line.Thickness = 0.5
-                                    line.From = prevPoint
-                                    line.To = Vector2.new(futureScreen.X, futureScreen.Y)
-                                    line.Visible = true
-                                    prevPoint = Vector2.new(futureScreen.X, futureScreen.Y)
-                                end
-                            end
-                        end
-                    end
                 end
             end
         end
         
+        -- Player ESP
         if Config.PlayerESP then
             for _, player in ipairs(Players:GetPlayers()) do
                 if player ~= LocalPlayer and player.Character then
                     local head = player.Character:FindFirstChild("Head")
                     local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-                    
                     if head and hrp then
                         local headPos, onScreen = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
                         local legPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
-                        
                         if onScreen then
                             local h = math.abs(headPos.Y - legPos.Y)
                             local w = h / 2
-                            
                             local box = AddDrawing(Drawing.new("Square"))
-                            box.Color = Color3.fromRGB(0, 200, 255)
+                            box.Color = Color3.fromRGB(0, 255, 100)
                             box.Thickness = 1
                             box.Size = Vector2.new(w, h)
                             box.Position = Vector2.new(headPos.X - w/2, headPos.Y)
@@ -668,6 +705,7 @@ task.spawn(function()
             end
         end
         
+        -- Tracers
         if Config.Tracers then
             local ball = FindBall()
             if ball then
@@ -675,14 +713,14 @@ task.spawn(function()
                     if player ~= LocalPlayer and player.Character then
                         local hrp = player.Character:FindFirstChild("HumanoidRootPart")
                         if hrp then
-                            local playerPos, pOn = Camera:WorldToViewportPoint(hrp.Position)
-                            local ballPos, bOn = Camera:WorldToViewportPoint(ball.Position)
+                            local pPos, pOn = Camera:WorldToViewportPoint(hrp.Position)
+                            local bPos, bOn = Camera:WorldToViewportPoint(ball.Position)
                             if pOn and bOn then
                                 local line = AddDrawing(Drawing.new("Line"))
-                                line.Color = Color3.fromRGB(0, 200, 255)
+                                line.Color = Color3.fromRGB(0, 200, 100)
                                 line.Thickness = 0.5
-                                line.From = Vector2.new(playerPos.X, playerPos.Y)
-                                line.To = Vector2.new(ballPos.X, ballPos.Y)
+                                line.From = Vector2.new(pPos.X, pPos.Y)
+                                line.To = Vector2.new(bPos.X, bPos.Y)
                                 line.Visible = true
                             end
                         end
@@ -691,59 +729,35 @@ task.spawn(function()
             end
         end
         
-        if Config.ShowParryCircle and LocalPlayer.Character then
-            local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local circlePos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-                if onScreen then
-                    local ball = FindBall()
-                    local dist = ball and BallDistanceToPlayer(ball, LocalPlayer) or 999
-                    local isTargeting = ball and IsBallTargetingPlayer(ball, LocalPlayer) or false
-                    
-                    local color = Color3.fromRGB(50, 255, 50)
-                    if isTargeting and dist < Config.ParryRadius * 2 then color = Color3.fromRGB(255, 255, 50) end
-                    if isTargeting and dist < Config.ParryRadius then color = Color3.fromRGB(255, 50, 50) end
-                    
-                    local circle = AddDrawing(Drawing.new("Circle"))
-                    circle.Color = color
-                    circle.Thickness = 1.5
-                    circle.Radius = Config.ParryRadius * 3
-                    circle.Position = Vector2.new(circlePos.X, circlePos.Y)
-                    circle.Filled = false
-                    circle.Visible = true
-                end
-            end
-        end
-        
+        -- Radar
         if Config.Radar then
-            local radarSize = 90
-            local radarX = Camera.ViewportSize.X - radarSize - 15
-            local radarY = Camera.ViewportSize.Y - radarSize - 15
+            local rs = 80
+            local rx = 10
+            local ry = Camera.ViewportSize.Y - rs - 10
             
-            local radarBg = AddDrawing(Drawing.new("Square"))
-            radarBg.Color = Color3.fromRGB(0, 0, 0)
-            radarBg.Size = Vector2.new(radarSize, radarSize)
-            radarBg.Position = Vector2.new(radarX, radarY)
-            radarBg.Filled = true
-            radarBg.Visible = true
+            local bg = AddDrawing(Drawing.new("Square"))
+            bg.Color = Color3.fromRGB(0, 0, 0)
+            bg.Size = Vector2.new(rs, rs)
+            bg.Position = Vector2.new(rx, ry)
+            bg.Filled = true
+            bg.Visible = true
             
             if LocalPlayer.Character then
                 local myHrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if myHrp then
                     for _, player in ipairs(Players:GetPlayers()) do
                         if player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
-                            local targetHrp = player.Character.HumanoidRootPart
-                            local offset = targetHrp.Position - myHrp.Position
-                            local radarDist = math.clamp(offset.Magnitude / 2, 0, radarSize/2 - 3)
-                            local angle = math.atan2(offset.Z, offset.X)
-                            
-                            local dotX = radarX + radarSize/2 + math.cos(angle) * radarDist
-                            local dotY = radarY + radarSize/2 + math.sin(angle) * radarDist
+                            local tHrp = player.Character.HumanoidRootPart
+                            local off = tHrp.Position - myHrp.Position
+                            local rd = math.clamp(off.Magnitude / 2, 0, rs/2 - 3)
+                            local ang = math.atan2(off.Z, off.X)
+                            local dx = rx + rs/2 + math.cos(ang) * rd
+                            local dy = ry + rs/2 + math.sin(ang) * rd
                             
                             local dot = AddDrawing(Drawing.new("Circle"))
                             dot.Color = player == LocalPlayer and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(255, 0, 0)
-                            dot.Radius = 3
-                            dot.Position = Vector2.new(dotX, dotY)
+                            dot.Radius = 2
+                            dot.Position = Vector2.new(dx, dy)
                             dot.Filled = true
                             dot.Visible = true
                         end
@@ -751,18 +765,18 @@ task.spawn(function()
                     
                     local ball = FindBall()
                     if ball then
-                        local offset = ball.Position - myHrp.Position
-                        local radarDist = math.clamp(offset.Magnitude / 2, 0, radarSize/2 - 3)
-                        local angle = math.atan2(offset.Z, offset.X)
-                        local dotX = radarX + radarSize/2 + math.cos(angle) * radarDist
-                        local dotY = radarY + radarSize/2 + math.sin(angle) * radarDist
+                        local off = ball.Position - myHrp.Position
+                        local rd = math.clamp(off.Magnitude / 2, 0, rs/2 - 2)
+                        local ang = math.atan2(off.Z, off.X)
+                        local dx = rx + rs/2 + math.cos(ang) * rd
+                        local dy = ry + rs/2 + math.sin(ang) * rd
                         
-                        local ballDot = AddDrawing(Drawing.new("Circle"))
-                        ballDot.Color = Color3.fromRGB(255, 255, 0)
-                        ballDot.Radius = 4
-                        ballDot.Position = Vector2.new(dotX, dotY)
-                        ballDot.Filled = true
-                        ballDot.Visible = true
+                        local bd = AddDrawing(Drawing.new("Circle"))
+                        bd.Color = Color3.fromRGB(255, 255, 0)
+                        bd.Radius = 3
+                        bd.Position = Vector2.new(dx, dy)
+                        bd.Filled = true
+                        bd.Visible = true
                     end
                 end
             end
@@ -770,25 +784,19 @@ task.spawn(function()
     end
 end)
 
--- ==================== AUTO ABILITIES ====================
+-- ==================== 8. AUTO ABILITIES ====================
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(0.3) do
         if Config.AutoAbilities then
             pcall(function()
                 FindRemotes()
                 if AbilityRemote then
                     local ball = FindBall()
-                    local dist = ball and BallDistanceToPlayer(ball, LocalPlayer) or 999
-                    local isTargeting = ball and IsBallTargetingPlayer(ball, LocalPlayer) or false
-                    
-                    if Config.AbilityPriority == "Defensive" or Config.AbilityPriority == "Both" then
-                        if isTargeting and dist < Config.ParryRadius * 1.5 then
+                    if ball then
+                        if Config.AbilityPriority == "Defensive" or Config.AbilityPriority == "Both" then
                             AbilityRemote:FireServer("Dash")
                         end
-                    end
-                    
-                    if Config.AbilityPriority == "Offensive" or Config.AbilityPriority == "Both" then
-                        if dist > Config.ParryRadius * 3 then
+                        if Config.AbilityPriority == "Offensive" or Config.AbilityPriority == "Both" then
                             AbilityRemote:FireServer("Rage")
                         end
                     end
@@ -798,11 +806,11 @@ task.spawn(function()
     end
 end)
 
--- ==================== MOVEMENT ====================
+-- ==================== 9. MOVEMENT ====================
 RunService.Stepped:Connect(function()
     if Config.SpeedHack and LocalPlayer.Character then
-        local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if humanoid then humanoid.WalkSpeed = Config.SpeedValue end
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = Config.SpeedValue end
     end
 end)
 
@@ -833,5 +841,4 @@ task.spawn(function()
     end
 end)
 
-print("Blade Ball Ultimate Loaded!")
-print("Created by plalettescripts")
+print("⚡ Blade Ball v2.0 - Instant Parry | plalettescripts")
