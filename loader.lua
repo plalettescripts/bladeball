@@ -1,115 +1,50 @@
---[[
-    ╔══════════════════════════════════════════════════════════════╗
-    ║                    BLADE BALL - ULTIMATE                    ║
-    ║                  Created by: plalettescripts                ║
-    ║                  Version: 1.0 | No Kick                     ║
-    ╚══════════════════════════════════════════════════════════════╝
-    
-    SEKTIONEN:
-    1. Services & Variablen
-    2. GUI-System (Dark-Mode, Tabs, Animationen)
-    3. Auto Parry (Ball-Erkennung, Velocity, Distanz, Remote)
-    4. Auto Aim / Ball Redirect
-    5. ESP & Visuals (Ball, Spieler, Radar, Tracer)
-    6. Ability Automatisierung
-    7. Movement & Ausweichen
-    8. Spielmodus-Erkennung
-    9. Konfiguration & Webhook
-    10. Benachrichtigungs-System
-    11. Anti-Cheat & Humanisierung
-]]
-
--- ==================== 1. SERVICES & VARIABLEN ====================
+-- Blade Ball Ultimate Script
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
-local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
-local HttpService = game:GetService("HttpService")
-local Lighting = game:GetService("Lighting")
 
 local LocalPlayer = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera
 local Mouse = LocalPlayer:GetMouse()
 
--- Konfiguration (Standardwerte)
 local Config = {
-    -- Auto Parry
     AutoParry = false,
     ParryRadius = 18,
-    ParryDelayMin = 50,   -- ms
-    ParryDelayMax = 150,  -- ms
     ShowParryCircle = true,
-    ParryHumanize = true,
-    
-    -- Auto Aim
     AutoAim = false,
     AimFOV = 120,
     AimPrediction = true,
-    AimPriority = "Distance", -- "Distance", "Weakest", "Dangerous"
-    
-    -- ESP
+    AimPriority = "Distance",
     BallESP = false,
     PlayerESP = false,
     Tracers = false,
     Radar = false,
     ShowTrajectory = true,
-    
-    -- Movement
     AutoDodge = false,
     SpeedHack = false,
     SpeedValue = 32,
     Fly = false,
     FlySpeed = 50,
-    
-    -- Abilities
     AutoAbilities = false,
-    AbilityPriority = "Defensive", -- "Defensive", "Offensive", "Both"
-    
-    -- Settings
-    WebhookURL = "",
-    KeySystem = false,
-    KeyBind = Enum.KeyCode.LeftControl
+    AbilityPriority = "Defensive"
 }
 
--- Speicher für ESP-Zeichnungen (Limit: 100)
 local ESPDrawings = {}
-local MaxDrawings = 100
-
--- Verbindungs-Speicher
 local Connections = {}
-
--- Remote-Event-Cache
 local ParryRemote = nil
 local AbilityRemote = nil
-local BallRemote = nil
 
--- Spielmodus-Erkennung
-local GameMode = "Standard"
-local InRound = false
-
--- ==================== HILFSFUNKTIONEN ====================
-
--- Humanisierte Verzögerung
-local function HumanizeDelay(min, max)
-    if not Config.ParryHumanize then return 0 end
-    return math.random(min or 50, max or 150) / 1000
-end
-
--- Zeichnungen sicher entfernen
 local function ClearDrawings()
-    for _, d in pairs(ESPDrawings) do
-        pcall(function() d:Remove() end)
-    end
+    for _, d in pairs(ESPDrawings) do pcall(function() d:Remove() end) end
     ESPDrawings = {}
 end
 
--- Zeichnung hinzufügen mit Limit-Prüfung
 local function AddDrawing(drawing)
-    if #ESPDrawings >= MaxDrawings then
+    if #ESPDrawings >= 100 then
         local old = table.remove(ESPDrawings, 1)
         pcall(function() old:Remove() end)
     end
@@ -117,65 +52,46 @@ local function AddDrawing(drawing)
     return drawing
 end
 
--- Ball im Workspace finden
 local function FindBall()
-    -- Suche nach dem Ball über verschiedene Methoden
     local ball = Workspace:FindFirstChild("Ball") or Workspace:FindFirstChild("BladeBall")
     if ball and ball:IsA("BasePart") then return ball end
-    
-    -- Suche in Ordnern
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj.Name == "Ball" and obj:IsA("BasePart") and obj.Velocity.Magnitude > 1 then
             return obj
         end
     end
-    
-    -- Suche über CollectionService Tags
     for _, obj in ipairs(CollectionService:GetTagged("Ball")) do
         if obj:IsA("BasePart") then return obj end
     end
-    
     return nil
 end
 
--- Remote Events finden
 local function FindRemotes()
     if ParryRemote and AbilityRemote then return end
-    
     for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
         if obj:IsA("RemoteEvent") then
             local name = obj.Name:lower()
-            if name:find("parry") or name:find("block") then
+            if name:find("parry") or name:find("block") or name:find("defend") then
                 ParryRemote = obj
             elseif name:find("ability") or name:find("skill") or name:find("dash") then
                 AbilityRemote = obj
-            elseif name:find("ball") or name:find("hit") then
-                BallRemote = obj
             end
         end
     end
 end
 
--- Prüfen ob Ball auf Spieler zielt
 local function IsBallTargetingPlayer(ball, player)
     if not ball or not player or not player.Character then return false end
-    
-    local char = player.Character
-    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hrp = player.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return false end
-    
     local ballVelocity = ball.Velocity or ball.AssemblyLinearVelocity or Vector3.zero
     if ballVelocity.Magnitude < 1 then return false end
-    
-    -- Prüfe ob Ball in Richtung des Spielers fliegt
     local ballToPlayer = (hrp.Position - ball.Position).Unit
     local ballDirection = ballVelocity.Unit
     local dotProduct = ballToPlayer:Dot(ballDirection)
-    
-    return dotProduct > 0.3 -- Ball bewegt sich generell in Spieler-Richtung
+    return dotProduct > 0.3
 end
 
--- Distanz zwischen Ball und Spieler
 local function BallDistanceToPlayer(ball, player)
     if not ball or not player or not player.Character then return 999 end
     local hrp = player.Character:FindFirstChild("HumanoidRootPart")
@@ -183,14 +99,13 @@ local function BallDistanceToPlayer(ball, player)
     return (ball.Position - hrp.Position).Magnitude
 end
 
--- ==================== 2. GUI-SYSTEM ====================
+-- GUI
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "PlaletteBladeBall"
 ScreenGui.Parent = CoreGui
 
--- Hauptrahmen
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 300, 0, 420)
+MainFrame.Size = UDim2.new(0, 300, 0, 400)
 MainFrame.Position = UDim2.new(0.75, 0, 0.2, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 22)
 MainFrame.BorderSizePixel = 0
@@ -199,7 +114,6 @@ MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 Instance.new("UICorner", MainFrame).CornerRadius = UDim.new(0, 10)
 
--- Animierter Rand
 local Border = Instance.new("Frame")
 Border.Size = UDim2.new(1, 4, 1, 4)
 Border.Position = UDim2.new(0, -2, 0, -2)
@@ -208,7 +122,6 @@ Border.BorderSizePixel = 0
 Border.Parent = MainFrame
 Instance.new("UICorner", Border).CornerRadius = UDim.new(0, 11)
 
--- Rand-Animation (Cyan-Blau Verlauf)
 task.spawn(function()
     local hue = 0.55
     while ScreenGui and ScreenGui.Parent do
@@ -219,7 +132,6 @@ task.spawn(function()
     end
 end)
 
--- Minimiertes Fenster
 local MiniFrame = Instance.new("Frame")
 MiniFrame.Size = UDim2.new(0, 180, 0, 40)
 MiniFrame.Position = UDim2.new(0.5, -90, 0.02, 0)
@@ -235,21 +147,19 @@ local MiniText = Instance.new("TextLabel")
 MiniText.Size = UDim2.new(1, 0, 1, 0)
 MiniText.BackgroundTransparency = 1
 MiniText.TextColor3 = Color3.fromRGB(0, 200, 255)
-MiniText.Text = "⚔️ plalettescripts - CTRL"
+MiniText.Text = "plalettescripts - Press CTRL"
 MiniText.Font = Enum.Font.SourceSansBold
 MiniText.TextSize = 12
 MiniText.Parent = MiniFrame
 
--- CTRL Toggle
 UserInputService.InputBegan:Connect(function(input, processed)
     if processed then return end
-    if input.KeyCode == Config.KeyBind then
+    if input.KeyCode == Enum.KeyCode.LeftControl or input.KeyCode == Enum.KeyCode.RightControl then
         MainFrame.Visible = not MainFrame.Visible
         MiniFrame.Visible = not MiniFrame.Visible
     end
 end)
 
--- Titel
 local TitleBar = Instance.new("Frame")
 TitleBar.Size = UDim2.new(1, 0, 0, 35)
 TitleBar.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
@@ -262,7 +172,7 @@ TitleText.Size = UDim2.new(0.7, 0, 1, 0)
 TitleText.Position = UDim2.new(0.06, 0, 0, 0)
 TitleText.BackgroundTransparency = 1
 TitleText.TextColor3 = Color3.fromRGB(0, 220, 255)
-TitleText.Text = "⚔️ Blade Ball Ultimate"
+TitleText.Text = "Blade Ball Ultimate"
 TitleText.Font = Enum.Font.SourceSansBold
 TitleText.TextSize = 16
 TitleText.TextXAlignment = Enum.TextXAlignment.Left
@@ -284,7 +194,6 @@ CloseBtn.MouseButton1Click:Connect(function()
     ScreenGui:Destroy()
 end)
 
--- Tab-System
 local TabContainer = Instance.new("Frame")
 TabContainer.Size = UDim2.new(0, 85, 1, -39)
 TabContainer.Position = UDim2.new(0, 2, 0, 37)
@@ -307,7 +216,6 @@ ContentFrame.BorderSizePixel = 0
 ContentFrame.Parent = MainFrame
 Instance.new("UICorner", ContentFrame).CornerRadius = UDim.new(0, 6)
 
--- Tab-Erstellungs-Funktion
 local function CreateTab(name, icon)
     local TabBtn = Instance.new("TextButton")
     TabBtn.Size = UDim2.new(1, -4, 0, 28)
@@ -328,7 +236,7 @@ local function CreateTab(name, icon)
     Content.BorderSizePixel = 0
     Content.ScrollBarThickness = 3
     Content.ScrollBarImageColor3 = Color3.fromRGB(0, 180, 240)
-    Content.CanvasSize = UDim2.new(0, 0, 0, 500)
+    Content.CanvasSize = UDim2.new(0, 0, 0, 600)
     Content.Visible = false
     Content.Parent = ContentFrame
 
@@ -353,7 +261,6 @@ local function CreateTab(name, icon)
         TabBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
     end)
 
-    -- Auto-select first tab
     local found = false
     for _, child in ipairs(ContentFrame:GetChildren()) do
         if child:IsA("ScrollingFrame") and child.Visible then found = true end
@@ -376,7 +283,7 @@ local function CreateTab(name, icon)
         Lbl.Size = UDim2.new(1, 0, 1, 0)
         Lbl.BackgroundTransparency = 1
         Lbl.TextColor3 = Color3.fromRGB(0, 200, 255)
-        Lbl.Text = "⚡ " .. text .. " ⚡"
+        Lbl.Text = text
         Lbl.Font = Enum.Font.SourceSansBold
         Lbl.TextSize = 10
         Lbl.Parent = Div
@@ -525,35 +432,30 @@ local function CreateTab(name, icon)
     return tab
 end
 
--- Tabs erstellen
 local CombatTab = CreateTab("Combat", "⚔")
 local VisualsTab = CreateTab("Visuals", "👁")
 local MoveTab = CreateTab("Move", "🏃")
 local AbilityTab = CreateTab("Ability", "✨")
-local SettingsTab = CreateTab("Settings", "⚙")
-
--- ==================== GUI INHALT ====================
 
 -- Combat Tab
 CombatTab:AddDivider("Auto Parry")
-CombatTab:AddToggle("Auto Parry", "AutoParry")
+CombatTab:AddToggle("Auto Parry (Instant)", "AutoParry")
 CombatTab:AddSlider("Parry Radius", "ParryRadius", 5, 40, 18)
-CombatTab:AddToggle("Parry-Kreis anzeigen", "ShowParryCircle")
-CombatTab:AddToggle("Humanized Timing", "ParryHumanize")
+CombatTab:AddToggle("Parry Circle", "ShowParryCircle")
 
 CombatTab:AddDivider("Auto Aim")
 CombatTab:AddToggle("Auto Aim", "AutoAim")
 CombatTab:AddSlider("Aim FOV", "AimFOV", 30, 180, 120)
 CombatTab:AddToggle("Prediction", "AimPrediction")
-CombatTab:AddDropdown("Priorität", "AimPriority", {"Distance", "Weakest", "Dangerous"}, "Distance")
+CombatTab:AddDropdown("Priority", "AimPriority", {"Distance", "Weakest", "Dangerous"}, "Distance")
 
 -- Visuals Tab
 VisualsTab:AddDivider("ESP")
 VisualsTab:AddToggle("Ball ESP", "BallESP")
-VisualsTab:AddToggle("Spieler ESP", "PlayerESP")
-VisualsTab:AddToggle("Tracer", "Tracers")
+VisualsTab:AddToggle("Player ESP", "PlayerESP")
+VisualsTab:AddToggle("Tracers", "Tracers")
 VisualsTab:AddToggle("Radar", "Radar")
-VisualsTab:AddToggle("Flugbahn", "ShowTrajectory")
+VisualsTab:AddToggle("Trajectory", "ShowTrajectory")
 
 -- Movement Tab
 MoveTab:AddDivider("Movement")
@@ -566,49 +468,44 @@ MoveTab:AddToggle("Fly", "Fly")
 -- Ability Tab
 AbilityTab:AddDivider("Abilities")
 AbilityTab:AddToggle("Auto Abilities", "AutoAbilities")
-AbilityTab:AddDropdown("Priorität", "AbilityPriority", {"Defensive", "Offensive", "Both"}, "Defensive")
+AbilityTab:AddDropdown("Priority", "AbilityPriority", {"Defensive", "Offensive", "Both"}, "Defensive")
 
--- Settings Tab
-SettingsTab:AddDivider("Settings")
-SettingsTab:AddToggle("Key-System", "KeySystem")
+-- Credits (in Settings tab content area, properly sized)
+local SettingsContent = CreateTab("Settings", "⚙").Content or ContentFrame
+local CreditFrame = Instance.new("Frame")
+CreditFrame.Size = UDim2.new(1, -2, 0, 120)
+CreditFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+CreditFrame.Parent = SettingsContent
+Instance.new("UICorner", CreditFrame).CornerRadius = UDim.new(0, 6)
 
-local CreditsFrame = Instance.new("Frame")
-CreditsFrame.Size = UDim2.new(1, -2, 0, 120)
-CreditsFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
-CreditsFrame.Parent = SettingsTab.Content or ContentFrame
-Instance.new("UICorner", CreditsFrame).CornerRadius = UDim.new(0, 6)
-
-local CreditsText = Instance.new("TextLabel")
-CreditsText.Size = UDim2.new(1, -16, 1, -16)
-CreditsText.Position = UDim2.new(0, 8, 0, 8)
-CreditsText.BackgroundTransparency = 1
-CreditsText.TextColor3 = Color3.fromRGB(200, 230, 255)
-CreditsText.Text = [[
-⚔️ Blade Ball Ultimate ⚔️
+local CreditText = Instance.new("TextLabel")
+CreditText.Size = UDim2.new(1, -16, 1, -16)
+CreditText.Position = UDim2.new(0, 8, 0, 8)
+CreditText.BackgroundTransparency = 1
+CreditText.TextColor3 = Color3.fromRGB(200, 230, 255)
+CreditText.Text = [[
+Blade Ball Ultimate
 
 Created by: plalettescripts
 
-GitHub: plalettescripts/bladeball-script
-
 Features:
-- Auto Parry mit Radius
-- Auto Aim mit Prediction
-- Ball & Spieler ESP
-- Tracer & Radar
-- Auto Abilities
+- Auto Parry (Instant)
+- Auto Aim + Prediction
+- Ball & Player ESP
+- Tracers & Radar
 - Speed Hack & Fly
-- Anti-Cheat Humanization
+- Auto Abilities
 
-💙 Made by Plalette 💙
+Made by Plalette
 ]]
-CreditsText.Font = Enum.Font.SourceSans
-CreditsText.TextSize = 11
-CreditsText.TextXAlignment = Enum.TextXAlignment.Left
-CreditsText.TextYAlignment = Enum.TextYAlignment.Top
-CreditsText.TextWrapped = true
-CreditsText.Parent = CreditsFrame
+CreditText.Font = Enum.Font.SourceSans
+CreditText.TextSize = 11
+CreditText.TextXAlignment = Enum.TextXAlignment.Left
+CreditText.TextYAlignment = Enum.TextYAlignment.Top
+CreditText.TextWrapped = true
+CreditText.Parent = CreditFrame
 
--- ==================== 3. AUTO PARRY ====================
+-- ==================== AUTO PARRY (INSTANT) ====================
 task.spawn(function()
     while task.wait() do
         if Config.AutoParry then
@@ -620,24 +517,20 @@ task.spawn(function()
                     local dist = BallDistanceToPlayer(ball, LocalPlayer)
                     local isTargeting = IsBallTargetingPlayer(ball, LocalPlayer)
                     
-                    -- Parry auslösen wenn Ball in Reichweite und auf Spieler gerichtet
+                    -- INHUMAN REACTION - Instant parry, no delay
                     if dist <= Config.ParryRadius and isTargeting then
-                        local delay = HumanizeDelay(Config.ParryDelayMin, Config.ParryDelayMax)
-                        task.wait(delay)
-                        
-                        -- Parry Remote feuern
                         ParryRemote:FireServer()
                     end
                 end
             end)
         end
-        task.wait(0.016) -- ~60 FPS
+        task.wait(0.005) -- Ultra-fast polling for instant reaction
     end
 end)
 
--- ==================== 4. AUTO AIM ====================
+-- ==================== AUTO AIM ====================
 task.spawn(function()
-    while task.wait() do
+    while task.wait(0.03) do
         if Config.AutoAim then
             pcall(function()
                 local ball = FindBall()
@@ -647,7 +540,6 @@ task.spawn(function()
                         local closestDist = math.huge
                         local target = nil
                         
-                        -- Auto Aim nach erfolgreichem Parry
                         for _, player in ipairs(Players:GetPlayers()) do
                             if player ~= LocalPlayer and player.Character then
                                 local targetHrp = player.Character:FindFirstChild("HumanoidRootPart")
@@ -666,7 +558,6 @@ task.spawn(function()
                             end
                         end
                         
-                        -- Kamera auf Ziel richten
                         if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
                             if Config.AimPrediction then
                                 local velocity = target.Character.HumanoidRootPart.Velocity or Vector3.zero
@@ -680,12 +571,10 @@ task.spawn(function()
                 end
             end)
         end
-        task.wait(0.03)
     end
 end)
 
--- ==================== 5. ESP & VISUALS ====================
--- Ball ESP
+-- ==================== ESP ====================
 task.spawn(function()
     while task.wait(0.04) do
         ClearDrawings()
@@ -695,16 +584,14 @@ task.spawn(function()
             if ball then
                 local pos, onScreen = Camera:WorldToViewportPoint(ball.Position)
                 if onScreen then
-                    -- Ball-Name
                     local name = AddDrawing(Drawing.new("Text"))
-                    name.Text = "⚽ Ball"
+                    name.Text = "Ball"
                     name.Color = Color3.fromRGB(255, 200, 50)
                     name.Size = 14
                     name.Position = Vector2.new(pos.X, pos.Y - 20)
                     name.Center = true
                     name.Visible = true
                     
-                    -- Distanz
                     if LocalPlayer.Character then
                         local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                         if hrp then
@@ -719,36 +606,26 @@ task.spawn(function()
                         end
                     end
                     
-                    -- Geschwindigkeitsbalken
-                    local vel = ball.Velocity or ball.AssemblyLinearVelocity or Vector3.zero
-                    local speed = math.floor(vel.Magnitude)
-                    local barWidth = math.clamp(speed / 2, 10, 60)
-                    local bar = AddDrawing(Drawing.new("Line"))
-                    bar.Color = speed > 80 and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(50, 255, 50)
-                    bar.Thickness = 3
-                    bar.From = Vector2.new(pos.X - barWidth/2, pos.Y + 10)
-                    bar.To = Vector2.new(pos.X + barWidth/2, pos.Y + 10)
-                    bar.Visible = true
-                    
-                    -- Flugbahn-Vorschau
-                    if Config.ShowTrajectory and vel.Magnitude > 1 then
-                        local steps = 20
-                        local prevPoint = Vector2.new(pos.X, pos.Y)
-                        local direction = vel.Unit
-                        local gravity = Vector3.new(0, -Workspace.Gravity, 0)
-                        
-                        for i = 1, steps do
-                            local t = i * 0.05
-                            local futurePos = ball.Position + vel * t + 0.5 * gravity * t * t
-                            local futureScreen, futureOn = Camera:WorldToViewportPoint(futurePos)
-                            if futureOn and (futureScreen - Vector3.new(pos.X, pos.Y, 0)).Magnitude < 300 then
-                                local line = AddDrawing(Drawing.new("Line"))
-                                line.Color = Color3.fromRGB(255, 255, 100)
-                                line.Thickness = 0.5
-                                line.From = prevPoint
-                                line.To = Vector2.new(futureScreen.X, futureScreen.Y)
-                                line.Visible = true
-                                prevPoint = Vector2.new(futureScreen.X, futureScreen.Y)
+                    if Config.ShowTrajectory then
+                        local vel = ball.Velocity or ball.AssemblyLinearVelocity or Vector3.zero
+                        if vel.Magnitude > 1 then
+                            local steps = 15
+                            local prevPoint = Vector2.new(pos.X, pos.Y)
+                            local gravity = Vector3.new(0, -Workspace.Gravity, 0)
+                            
+                            for i = 1, steps do
+                                local t = i * 0.05
+                                local futurePos = ball.Position + vel * t + 0.5 * gravity * t * t
+                                local futureScreen, futureOn = Camera:WorldToViewportPoint(futurePos)
+                                if futureOn then
+                                    local line = AddDrawing(Drawing.new("Line"))
+                                    line.Color = Color3.fromRGB(255, 255, 100)
+                                    line.Thickness = 0.5
+                                    line.From = prevPoint
+                                    line.To = Vector2.new(futureScreen.X, futureScreen.Y)
+                                    line.Visible = true
+                                    prevPoint = Vector2.new(futureScreen.X, futureScreen.Y)
+                                end
                             end
                         end
                     end
@@ -756,13 +633,11 @@ task.spawn(function()
             end
         end
         
-        -- Spieler ESP
         if Config.PlayerESP then
             for _, player in ipairs(Players:GetPlayers()) do
                 if player ~= LocalPlayer and player.Character then
                     local head = player.Character:FindFirstChild("Head")
                     local hrp = player.Character:FindFirstChild("HumanoidRootPart")
-                    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
                     
                     if head and hrp then
                         local headPos, onScreen = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
@@ -772,7 +647,6 @@ task.spawn(function()
                             local h = math.abs(headPos.Y - legPos.Y)
                             local w = h / 2
                             
-                            -- Box
                             local box = AddDrawing(Drawing.new("Square"))
                             box.Color = Color3.fromRGB(0, 200, 255)
                             box.Thickness = 1
@@ -781,7 +655,6 @@ task.spawn(function()
                             box.Filled = false
                             box.Visible = true
                             
-                            -- Name
                             local pName = AddDrawing(Drawing.new("Text"))
                             pName.Text = player.Name
                             pName.Color = Color3.fromRGB(255, 255, 255)
@@ -789,27 +662,12 @@ task.spawn(function()
                             pName.Position = Vector2.new(headPos.X, headPos.Y - 18)
                             pName.Center = true
                             pName.Visible = true
-                            
-                            -- Lebensbalken
-                            if humanoid then
-                                local healthPercent = humanoid.Health / humanoid.MaxHealth
-                                local barH = h
-                                local barX = headPos.X - w/2 - 6
-                                
-                                local healthBar = AddDrawing(Drawing.new("Line"))
-                                healthBar.Color = Color3.fromRGB(50, 255, 50)
-                                healthBar.Thickness = 2
-                                healthBar.From = Vector2.new(barX, legPos.Y)
-                                healthBar.To = Vector2.new(barX, legPos.Y + barH * healthPercent)
-                                healthBar.Visible = true
-                            end
                         end
                     end
                 end
             end
         end
         
-        -- Tracer
         if Config.Tracers then
             local ball = FindBall()
             if ball then
@@ -833,7 +691,6 @@ task.spawn(function()
             end
         end
         
-        -- Parry-Radius-Kreis
         if Config.ShowParryCircle and LocalPlayer.Character then
             local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
             if hrp then
@@ -843,19 +700,14 @@ task.spawn(function()
                     local dist = ball and BallDistanceToPlayer(ball, LocalPlayer) or 999
                     local isTargeting = ball and IsBallTargetingPlayer(ball, LocalPlayer) or false
                     
-                    local color = Color3.fromRGB(50, 255, 50) -- Grün: sicher
-                    if isTargeting and dist < Config.ParryRadius * 2 then
-                        color = Color3.fromRGB(255, 255, 50) -- Gelb: Ball nähert sich
-                    end
-                    if isTargeting and dist < Config.ParryRadius then
-                        color = Color3.fromRGB(255, 50, 50) -- Rot: kritisch
-                    end
+                    local color = Color3.fromRGB(50, 255, 50)
+                    if isTargeting and dist < Config.ParryRadius * 2 then color = Color3.fromRGB(255, 255, 50) end
+                    if isTargeting and dist < Config.ParryRadius then color = Color3.fromRGB(255, 50, 50) end
                     
-                    local radius = Config.ParryRadius * 3
                     local circle = AddDrawing(Drawing.new("Circle"))
                     circle.Color = color
                     circle.Thickness = 1.5
-                    circle.Radius = radius
+                    circle.Radius = Config.ParryRadius * 3
                     circle.Position = Vector2.new(circlePos.X, circlePos.Y)
                     circle.Filled = false
                     circle.Visible = true
@@ -863,21 +715,18 @@ task.spawn(function()
             end
         end
         
-        -- Radar
         if Config.Radar then
-            local radarSize = 100
-            local radarX = Camera.ViewportSize.X - radarSize - 20
-            local radarY = Camera.ViewportSize.Y - radarSize - 20
+            local radarSize = 90
+            local radarX = Camera.ViewportSize.X - radarSize - 15
+            local radarY = Camera.ViewportSize.Y - radarSize - 15
             
             local radarBg = AddDrawing(Drawing.new("Square"))
             radarBg.Color = Color3.fromRGB(0, 0, 0)
-            radarBg.Thickness = 1
             radarBg.Size = Vector2.new(radarSize, radarSize)
             radarBg.Position = Vector2.new(radarX, radarY)
             radarBg.Filled = true
             radarBg.Visible = true
             
-            -- Spieler-Punkte auf Radar
             if LocalPlayer.Character then
                 local myHrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                 if myHrp then
@@ -900,7 +749,6 @@ task.spawn(function()
                         end
                     end
                     
-                    -- Ball auf Radar
                     local ball = FindBall()
                     if ball then
                         local offset = ball.Position - myHrp.Position
@@ -922,29 +770,26 @@ task.spawn(function()
     end
 end)
 
--- ==================== 6. ABILITY AUTOMATISIERUNG ====================
+-- ==================== AUTO ABILITIES ====================
 task.spawn(function()
     while task.wait(0.5) do
         if Config.AutoAbilities then
             pcall(function()
                 FindRemotes()
-                
                 if AbilityRemote then
                     local ball = FindBall()
                     local dist = ball and BallDistanceToPlayer(ball, LocalPlayer) or 999
                     local isTargeting = ball and IsBallTargetingPlayer(ball, LocalPlayer) or false
                     
-                    -- Defensive: Nutze Ability wenn Ball gefährlich nah
                     if Config.AbilityPriority == "Defensive" or Config.AbilityPriority == "Both" then
                         if isTargeting and dist < Config.ParryRadius * 1.5 then
-                            AbilityRemote:FireServer("Dash") -- oder passenden Ability-Namen
+                            AbilityRemote:FireServer("Dash")
                         end
                     end
                     
-                    -- Offensive: Nutze Ability wenn Ball weit weg
                     if Config.AbilityPriority == "Offensive" or Config.AbilityPriority == "Both" then
                         if dist > Config.ParryRadius * 3 then
-                            AbilityRemote:FireServer("Rage") -- oder passenden Ability-Namen
+                            AbilityRemote:FireServer("Rage")
                         end
                     end
                 end
@@ -953,18 +798,14 @@ task.spawn(function()
     end
 end)
 
--- ==================== 7. MOVEMENT ====================
--- Speed Hack
+-- ==================== MOVEMENT ====================
 RunService.Stepped:Connect(function()
     if Config.SpeedHack and LocalPlayer.Character then
         local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            humanoid.WalkSpeed = Config.SpeedValue
-        end
+        if humanoid then humanoid.WalkSpeed = Config.SpeedValue end
     end
 end)
 
--- Fly
 task.spawn(function()
     while task.wait() do
         if Config.Fly and LocalPlayer.Character then
@@ -992,66 +833,5 @@ task.spawn(function()
     end
 end)
 
--- ==================== 8. SPIELMODUS-ERKENNUNG ====================
-task.spawn(function()
-    while task.wait(2) do
-        pcall(function()
-            -- Einfache Spielmodus-Erkennung über GUI-Elemente
-            local screenGuis = LocalPlayer.PlayerGui:GetChildren()
-            for _, gui in ipairs(screenGuis) do
-                if gui:IsA("ScreenGui") then
-                    local text = gui.Name:lower()
-                    if text:find("clash") then GameMode = "Clash"
-                    elseif text:find("team") then GameMode = "Teams"
-                    elseif text:find("sudden") then GameMode = "Sudden Death"
-                    else GameMode = "Standard" end
-                end
-            end
-        end)
-    end
-end)
-
--- ==================== 9. BENACHRICHTIGUNGS-SYSTEM ====================
-local function Notify(title, message, duration)
-    duration = duration or 3
-    local NotifFrame = Instance.new("Frame")
-    NotifFrame.Size = UDim2.new(0, 220, 0, 50)
-    NotifFrame.Position = UDim2.new(1, -230, 1, -60)
-    NotifFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
-    NotifFrame.BorderSizePixel = 0
-    NotifFrame.Parent = ScreenGui
-    Instance.new("UICorner", NotifFrame).CornerRadius = UDim.new(0, 6)
-    
-    local TitleLabel = Instance.new("TextLabel")
-    TitleLabel.Size = UDim2.new(1, -10, 0, 18)
-    TitleLabel.Position = UDim2.new(0, 5, 0, 3)
-    TitleLabel.BackgroundTransparency = 1
-    TitleLabel.TextColor3 = Color3.fromRGB(0, 200, 255)
-    TitleLabel.Text = title
-    TitleLabel.Font = Enum.Font.SourceSansBold
-    TitleLabel.TextSize = 12
-    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
-    TitleLabel.Parent = NotifFrame
-    
-    local MsgLabel = Instance.new("TextLabel")
-    MsgLabel.Size = UDim2.new(1, -10, 0, 24)
-    MsgLabel.Position = UDim2.new(0, 5, 0, 22)
-    MsgLabel.BackgroundTransparency = 1
-    MsgLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    MsgLabel.Text = message
-    MsgLabel.Font = Enum.Font.SourceSans
-    MsgLabel.TextSize = 11
-    MsgLabel.TextXAlignment = Enum.TextXAlignment.Left
-    MsgLabel.Parent = NotifFrame
-    
-    task.delay(duration, function()
-        pcall(function() NotifFrame:Destroy() end)
-    end)
-end
-
--- ==================== 10. WILLKOMMENSNACHRICHT ====================
-Notify("⚔️ Blade Ball Ultimate", "Willkommen! Created by plalettescripts", 5)
-print("⚔️ Blade Ball Ultimate geladen!")
-print("👤 Created by: plalettescripts")
-print("⚡ Auto Parry | ESP | Aimbot | Fly | Abilities")
-print("🔵 CTRL = Minimieren")
+print("Blade Ball Ultimate Loaded!")
+print("Created by plalettescripts")
